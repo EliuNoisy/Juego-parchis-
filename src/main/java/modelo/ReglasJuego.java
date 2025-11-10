@@ -1,9 +1,11 @@
 /**
  * Define y aplica todas las reglas del Parchis Star
  * Incluye: turno extra, comer fichas, barreras, meta, penalizaciones
+ * Registro apropiado de eventos
  */
 package modelo;
 
+import utilidades.RegistroPartidaJSON;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -50,7 +52,7 @@ public class ReglasJuego {
     }
     
     /**
-     * Verifica si la ficha llego a la meta
+     * Verifica si la ficha llego a la meta - CORREGIDO
      * @param ficha Ficha a verificar
      * @return true si llego a meta, false si no
      */
@@ -59,44 +61,61 @@ public class ReglasJuego {
     }
     
     /**
-     * Aplica todas las reglas del juego despues de un movimiento
+     * Aplica todas las reglas del juego despues de un movimiento - CORREGIDO
      * Verifica: comer fichas, barreras, llegada a meta
      * @param jugador Jugador que realizo el movimiento
      * @param ficha Ficha que se movio
      * @param tablero Tablero del juego
+     * @param partida Partida actual para buscar jugadores
+     * @param registro Registro JSON para eventos
+     * @return Numero de casillas de premio (0, 10 o 20)
      */
-    public void aplicar(Jugador jugador, Ficha ficha, Tablero tablero) {
+    public int aplicar(Jugador jugador, Ficha ficha, Tablero tablero, Partida partida, RegistroPartidaJSON registro) {
+        int premioCasillas = 0;
         int posicion = ficha.getPosicion();
         Casilla casilla = tablero.getCasilla(posicion);
         
-        if (casilla == null || ficha.isEnMeta()) return;
+        if (casilla == null || ficha.isEnMeta()) return 0;
         
-        // REGLA: Comer fichas en casillas normales
         if (!casilla.esSegura()) {
             List<Ficha> fichasEnCasilla = new ArrayList<>(casilla.getFichas());
             for (Ficha otraFicha : fichasEnCasilla) {
                 if (!otraFicha.equals(ficha) && !otraFicha.getColor().equals(ficha.getColor())) {
-                    System.out.println("\nFICHA COMIDA " + jugador.getNombre() + 
+                    System.out.println("\nFICHA COMIDA! " + jugador.getNombre() + 
                                      " come ficha " + otraFicha.getColor());
+                    
+                    Jugador jugadorVictima = partida.buscarJugadorPorColor(otraFicha.getColor());
+                    String nombreVictima = (jugadorVictima != null) ? jugadorVictima.getNombre() : "Oponente";
+                    
+                    registro.registrarFichaComida(
+                        jugador.getNombre(),
+                        nombreVictima,
+                        otraFicha.getIdFicha()
+                    );
+                    
                     otraFicha.regresarACasa();
                     casilla.removerFicha(otraFicha);
+                    
+                    premioCasillas = 20;
                     System.out.println("PREMIO: +20 casillas para avanzar con otra ficha");
                 }
             }
         }
         
-        // REGLA: Barrera formada
         if (casilla.verificarBarrera()) {
             System.out.println("BARRERA FORMADA en casilla " + posicion);
         }
         
-        // REGLA: Llegada a meta
-        if (verificarMeta(ficha)) {
-            if (!ficha.isEnMeta()) {
-                ficha.llegarMeta();
-                casilla.removerFicha(ficha);
-                System.out.println("FICHA EN META +10 casillas de premio");
-            }
+        if (verificarMeta(ficha) && !ficha.isEnMeta()) {
+            ficha.llegarMeta();
+            casilla.removerFicha(ficha);
+            
+            registro.registrarLlegadaMeta(jugador.getNombre(), ficha.getIdFicha());
+            
+            premioCasillas = 10;
+            System.out.println("FICHA EN META! +10 casillas de premio");
         }
+        
+        return premioCasillas;
     }
 }

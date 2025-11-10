@@ -1,63 +1,122 @@
 /**
- * Capa de control del patron MVC
- * Coordina la interaccion entre modelo y vista
- * Implementa la logica del Caso de Uso: Ejercer Turno
+ * Capa de control del patron MVC 
+ * Coordina la interaccion entre modelo, vista y red
+ * Aplica premios de casillas 
  */
 package controlador;
 
 import modelo.*;
 import vista.PantallaPartida;
+import utilidades.RegistroPartidaJSON;
 import java.util.List;
 import java.util.Scanner;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ControladorPartida {
     private Partida partida;
     private PantallaPartida vista;
     private Scanner scanner;
     private Ficha ultimaFichaMovida;
+    private ControladorRed controladorRed;
+    private int jugadorLocalId;
+    private int casillasPremio;
+    private AtomicBoolean procesandoPremio;
     
-    /**
-     * Constructor del controlador
-     * @param partida Modelo de partida
-     * @param vista Vista de presentacion
-     * @param scanner Scanner para entrada de usuario
-     */
-    public ControladorPartida(Partida partida, PantallaPartida vista, Scanner scanner) {
+    public ControladorPartida(Partida partida, PantallaPartida vista, Scanner scanner, int jugadorLocalId) {
         this.partida = partida;
         this.vista = vista;
         this.scanner = scanner;
         this.ultimaFichaMovida = null;
+        this.controladorRed = null;
+        this.jugadorLocalId = jugadorLocalId;
+        this.casillasPremio = 0;
+        this.procesandoPremio = new AtomicBoolean(false);
+    }
+    
+    public void setControladorRed(ControladorRed controladorRed) {
+        this.controladorRed = controladorRed;
+        controladorRed.setControladorPartida(this);
+    }
+    
+    public boolean esTurnoLocal() {
+        Jugador jugadorActual = partida.getTurnoActual();
+        return jugadorActual.getIdJugador() == jugadorLocalId;
+    }
+    
+    public void iniciarTurno() {
+        if (procesandoPremio.get()) {
+            return;
+        }
+        
+        Jugador jugadorActual = partida.getTurnoActual();
+        
+        if (controladorRed != null && !esTurnoLocal()) {
+            return;
+        }
+        
+        vista.mostrarTurnoActual(jugadorActual);
+        
+        if (controladorRed != null) {
+            System.out.println("\n*** ES TU TURNO ***");
+        }
+        
+        if (casillasPremio > 0) {
+            vista.mostrarMensaje("Tienes " + casillasPremio + " casillas de premio para usar!");
+            aplicarPremio(jugadorActual);
+        } else {
+            vista.mostrarMensaje("Presiona ENTER para lanzar el dado");
+            scanner.nextLine();
+            lanzarDado();
+        }
     }
     
     /**
-     * Inicia el turno de un jugador
-     * Muestra informacion y permite lanzar dado
+     * Aplica el premio de casillas acumuladas 
      */
-    public void iniciarTurno() {
-        Jugador jugadorActual = partida.getTurnoActual();
-        vista.mostrarTurnoActual(jugadorActual);
+    private void aplicarPremio(Jugador jugador) {
+        procesandoPremio.set(true);
+        List<Ficha> fichasDisponibles = jugador.getFichasEnJuego();
         
-        vista.mostrarMensaje("Presiona ENTER para lanzar el dado");
-        scanner.nextLine();
+        if (fichasDisponibles.isEmpty()) {
+            vista.mostrarMensaje("No tienes fichas en juego para usar el premio. Se pierde.");
+            casillasPremio = 0;
+            procesandoPremio.set(false);
+            return;
+        }
         
-        lanzarDado();
+        vista.mostrarMensaje("Selecciona una ficha para avanzar " + casillasPremio + " casillas:");
+        for (int i = 0; i < fichasDisponibles.size(); i++) {
+            Ficha f = fichasDisponibles.get(i);
+            System.out.println((i + 1) + ". Ficha " + f.getIdFicha() + 
+                             " - Posicion actual: " + f.getPosicion());
+        }
+        
+        int seleccion = solicitarSeleccionFicha(fichasDisponibles.size());
+        Ficha fichaSeleccionada = fichasDisponibles.get(seleccion - 1);
+        
+        moverFicha(fichaSeleccionada, casillasPremio, true);
+        casillasPremio = 0;
+        procesandoPremio.set(false);
     }
     
-/**
-     * Ejecuta el lanzamiento de dado y logica de movimiento
-     * Permite seleccionar ficha y aplicar reglas
-     */
     public void lanzarDado() {
         Jugador jugadorActual = partida.getTurnoActual();
         Dado dado = partida.getDado();
+        RegistroPartidaJSON registro = partida.getRegistroJSON();
         
         int valorDado = dado.lanzar();
         vista.mostrarResultadoDado(valorDado);
         
+        registro.registrarTiradaDado(jugadorActual.getNombre(), valorDado);
+        
+        if (controladorRed != null) {
+            controladorRed.enviarTiradaDado(valorDado);
+        }
+        
         List<Ficha> fichasDisponibles = jugadorActual.getFichasDisponibles(valorDado);
         
         if (fichasDisponibles.isEmpty()) {
-            vista.mostrarMensaje("No tienes fichas disponibles para mover Pierdes el turno");
+            vista.mostrarMensaje("No tienes fichas disponibles para mover. Pierdes el turno.");
             aplicarReglasDelTurno(valorDado);
             return;
         }
@@ -67,22 +126,16 @@ public class ControladorPartida {
             Ficha f = fichasDisponibles.get(i);
             String estado = f.isEnCasa() ? "En casa (saldra a casilla de salida)" : 
                            "Posicion actual: " + f.getPosicion();
-            System.out.println((i + 1) + " Ficha " + f.getIdFicha() + " - " + estado);
+            System.out.println((i + 1) + ". Ficha " + f.getIdFicha() + " - " + estado);
         }
         
         int seleccion = solicitarSeleccionFicha(fichasDisponibles.size());
         Ficha fichaSeleccionada = fichasDisponibles.get(seleccion - 1);
         
-        moverFicha(fichaSeleccionada, valorDado);
+        moverFicha(fichaSeleccionada, valorDado, true);
         aplicarReglasDelTurno(valorDado);
     }
     
-    /**
-     * Solicita al usuario seleccionar una ficha
-     * Valida que la entrada sea correcta
-     * @param maxOpciones Numero maximo de opciones validas
-     * @return Indice de la ficha seleccionada (1-maxOpciones)
-     */
     private int solicitarSeleccionFicha(int maxOpciones) {
         int seleccion = -1;
         while (seleccion < 1 || seleccion > maxOpciones) {
@@ -91,10 +144,10 @@ public class ControladorPartida {
                 seleccion = scanner.nextInt();
                 scanner.nextLine();
                 if (seleccion < 1 || seleccion > maxOpciones) {
-                    System.out.println("Opcion invalida Intenta de nuevo");
+                    System.out.println("Opcion invalida. Intenta de nuevo.");
                 }
             } catch (Exception e) {
-                System.out.println("Entrada invalida Ingresa un numero");
+                System.out.println("Entrada invalida. Ingresa un numero.");
                 scanner.nextLine();
             }
         }
@@ -102,17 +155,29 @@ public class ControladorPartida {
     }
     
     /**
-     * Mueve una ficha en el tablero
-     * Maneja sacar ficha de casa y movimientos normales
-     * @param ficha Ficha a mover
-     * @param pasos Numero de casillas a avanzar
+     * Mueve una ficha en el tablero 
      */
-    public void moverFicha(Ficha ficha, int pasos) {
+    public void moverFicha(Ficha ficha, int pasos, boolean enviarPorRed) {
+        if (ficha == null) {
+            vista.mostrarMensaje("Error: Ficha no valida");
+            return;
+        }
+        
+        if (ficha.isEnMeta()) {
+            vista.mostrarMensaje("Error: La ficha ya esta en meta");
+            return;
+        }
+        
+        if (pasos <= 0) {
+            vista.mostrarMensaje("Error: Movimiento invalido");
+            return;
+        }
+        
         Jugador jugadorActual = partida.getTurnoActual();
         Tablero tablero = partida.getTablero();
         ReglasJuego reglas = partida.getReglas();
+        RegistroPartidaJSON registro = partida.getRegistroJSON();
         
-        // REGLA: Sacar ficha con 5
         if (ficha.isEnCasa() && reglas.verificarSacarFichaConCinco(pasos)) {
             ficha.setEnCasa(false);
             int posicionSalida = obtenerPosicionSalida(jugadorActual.getColor());
@@ -124,22 +189,102 @@ public class ControladorPartida {
             vista.mostrarMensaje("Ficha sacada de casa a la posicion " + posicionSalida);
             ultimaFichaMovida = ficha;
             
+            registro.registrarSalidaCasa(jugadorActual.getNombre(), ficha.getIdFicha());
+            
         } else if (!ficha.isEnCasa()) {
-            // Mover ficha normal
+            int posicionInicial = ficha.getPosicion();
+            
             tablero.moverFicha(ficha, pasos);
             vista.actualizarFicha(ficha);
             ultimaFichaMovida = ficha;
+            
+            registro.registrarMovimiento(
+                jugadorActual.getNombre(),
+                ficha.getIdFicha(),
+                posicionInicial,
+                ficha.getPosicion()
+            );
         }
         
-        aplicarReglasDelJuego(ficha);
+        if (enviarPorRed && controladorRed != null) {
+            controladorRed.enviarMovimiento(jugadorActual, ficha, pasos);
+        }
+        
+        int premio = aplicarReglasDelJuego(ficha);
+        if (premio > 0) {
+            casillasPremio += premio;
+        }
     }
     
     /**
-     * Obtiene la posicion de salida segun el color del jugador
-     * Amarillo: 5, Azul: 22, Rojo: 39, Verde: 56
-     * @param color Color del jugador
-     * @return Numero de casilla de salida
+     * Aplica movimiento recibido desde la red con validacion
      */
+    public void aplicarMovimientoRemoto(int jugadorId, int fichaId, int pasos) {
+        Jugador jugador = null;
+        for (Jugador j : partida.getJugadores()) {
+            if (j.getIdJugador() == jugadorId) {
+                jugador = j;
+                break;
+            }
+        }
+        
+        if (jugador == null) {
+            System.err.println("[ERROR] Jugador no encontrado: " + jugadorId);
+            return;
+        }
+        
+        Ficha ficha = null;
+        for (Ficha f : jugador.getFichas()) {
+            if (f.getIdFicha() == fichaId) {
+                ficha = f;
+                break;
+            }
+        }
+        
+        if (ficha == null) {
+            System.err.println("[ERROR] Ficha no encontrada: " + fichaId);
+            return;
+        }
+        
+        // Validar que el movimiento remoto sea legal
+        if (!validarMovimientoRemoto(ficha, pasos, jugador)) {
+            System.err.println("[ERROR] Movimiento remoto invalido rechazado");
+            return;
+        }
+        
+        moverFicha(ficha, pasos, false);
+    }
+    
+    /**
+     * Valida que un movimiento recibido por red sea legal
+     */
+    private boolean validarMovimientoRemoto(Ficha ficha, int pasos, Jugador jugador) {
+        // Validar rango del dado
+        if (pasos < 1 || pasos > 6) {
+            return false;
+        }
+        
+        // No se puede mover una ficha en meta
+        if (ficha.isEnMeta()) {
+            return false;
+        }
+        
+        // Si esta en casa, solo puede salir con 5
+        if (ficha.isEnCasa() && pasos != 5) {
+            return false;
+        }
+        
+        // Validar que la nueva posicion sea valida
+        if (!ficha.isEnCasa()) {
+            int nuevaPosicion = ficha.getPosicion() + pasos;
+            if (nuevaPosicion < 0) {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+    
     private int obtenerPosicionSalida(String color) {
         switch (color.toLowerCase()) {
             case "amarillo": return 5;
@@ -151,34 +296,35 @@ public class ControladorPartida {
     }
     
     /**
-     * Aplica las reglas del juego despues de un movimiento
-     * Delega en el modelo de reglas
-     * @param ficha Ficha que se movio
+     * Aplica reglas y retorna casillas de premio
      */
-    public void aplicarReglasDelJuego(Ficha ficha) {
+    public int aplicarReglasDelJuego(Ficha ficha) {
         ReglasJuego reglas = partida.getReglas();
         Tablero tablero = partida.getTablero();
         Jugador jugadorActual = partida.getTurnoActual();
+        RegistroPartidaJSON registro = partida.getRegistroJSON();
         
-        reglas.aplicar(jugadorActual, ficha, tablero);
+        return reglas.aplicar(jugadorActual, ficha, tablero, partida, registro);
     }
     
-    /**
-     * Aplica reglas del turno: turno extra o cambio de jugador
-     * Maneja penalizacion de tres 6 seguidos
-     * @param valorDado Valor obtenido en el dado
-     */
     private void aplicarReglasDelTurno(int valorDado) {
         ReglasJuego reglas = partida.getReglas();
+        RegistroPartidaJSON registro = partida.getRegistroJSON();
+        Jugador jugadorActual = partida.getTurnoActual();
         
-        // REGLA: Turno extra con 6
         if (reglas.verificarTurnoExtra(valorDado)) {
             partida.incrementarContadorSeis();
             
-            // REGLA: Tres 6 seguidos - penalizacion
+            registro.registrarTurnoExtra(jugadorActual.getNombre());
+            
             if (reglas.verificarTresSeisSeguidos(partida.getContadorSeis())) {
-                vista.mostrarMensaje("TRES 6 SEGUIDOS La ultima ficha movida regresa a casa");
+                vista.mostrarMensaje("TRES 6 SEGUIDOS! La ultima ficha movida regresa a casa.");
                 if (ultimaFichaMovida != null && !ultimaFichaMovida.isEnMeta()) {
+                    registro.registrarPenalizacionTresSeis(
+                        jugadorActual.getNombre(),
+                        ultimaFichaMovida.getIdFicha()
+                    );
+                    
                     ultimaFichaMovida.regresarACasa();
                     Tablero tablero = partida.getTablero();
                     Casilla casilla = tablero.getCasilla(ultimaFichaMovida.getPosicion());
@@ -187,24 +333,56 @@ public class ControladorPartida {
                     }
                 }
                 partida.reiniciarContadorSeis();
+                casillasPremio = 0;
+                
+                Jugador jugadorAnterior = partida.getTurnoActual();
                 partida.cambiarTurno();
+                
+                registro.registrarCambioTurno(
+                    jugadorAnterior.getNombre(),
+                    partida.getTurnoActual().getNombre()
+                );
+                
+                if (controladorRed != null) {
+                    controladorRed.notificarCambioTurno(partida.getTurnoActual());
+                }
             } else {
-                vista.mostrarMensaje("Sacaste 6 Tienes un turno extra");
-                vista.mostrarMensaje("Presiona ENTER para continuar");
-                scanner.nextLine();
-                iniciarTurno();
+                vista.mostrarMensaje("Sacaste 6! Tienes un turno extra.");
+                
+                if (controladorRed == null || esTurnoLocal()) {
+                    vista.mostrarMensaje("Presiona ENTER para continuar");
+                    scanner.nextLine();
+                    iniciarTurno();
+                }
             }
         } else {
             partida.reiniciarContadorSeis();
+            
+            Jugador jugadorAnterior = partida.getTurnoActual();
             partida.cambiarTurno();
+            
+            registro.registrarCambioTurno(
+                jugadorAnterior.getNombre(),
+                partida.getTurnoActual().getNombre()
+            );
+            
+            if (controladorRed != null) {
+                controladorRed.notificarCambioTurno(partida.getTurnoActual());
+            }
         }
     }
     
     /**
-     * Verifica si algun jugador gano la partida
-     * Condicion: tener las 4 fichas en meta
-     * @return true si hay ganador, false si no
+     * Aplica cambio de turno recibido desde la red
      */
+    public void aplicarCambioTurnoRemoto(int jugadorId) {
+        partida.setTurnoActual(jugadorId);
+        
+        if (jugadorId == jugadorLocalId) {
+            System.out.println("\n>>> Tu turno! Presiona ENTER en el ciclo del juego <<<");
+        }
+    }
+    
     public boolean verificarFinPartida() {
         for (Jugador j : partida.getJugadores()) {
             int fichasEnMeta = 0;
@@ -214,11 +392,15 @@ public class ControladorPartida {
                 }
             }
             if (fichasEnMeta == 4) {
-                vista.mostrarMensaje(j.getNombre().toUpperCase() + " HA GANADO");
+                vista.mostrarMensaje(j.getNombre().toUpperCase() + " HA GANADO!");
                 partida.finalizarPartida();
                 return true;
             }
         }
         return false;
+    }
+    
+    public Partida getPartida() {
+        return partida;
     }
 }

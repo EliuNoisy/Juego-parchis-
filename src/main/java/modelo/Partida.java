@@ -1,9 +1,10 @@
 /**
- * Controla el flujo general de la partida
+ * Controla el flujo general de la partida 
  * Gestiona jugadores, turnos y estado del juego
  */
 package modelo;
 
+import utilidades.RegistroPartidaJSON;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -15,6 +16,7 @@ public class Partida {
     private ReglasJuego reglas;
     private Jugador turnoActual;
     private int contadorSeis;
+    private RegistroPartidaJSON registroJSON;
     
     /**
      * Constructor de partida
@@ -27,6 +29,7 @@ public class Partida {
         this.dado = new Dado();
         this.reglas = new ReglasJuego();
         this.contadorSeis = 0;
+        this.registroJSON = new RegistroPartidaJSON();
     }
     
     /**
@@ -42,6 +45,11 @@ public class Partida {
             }
             turnoActual = jugadores.get(0);
             turnoActual.setTurno(true);
+            
+            registroJSON.registrarInicio(
+                jugadores.get(0).getNombre(), 
+                jugadores.get(1).getNombre()
+            );
         }
     }
     
@@ -50,12 +58,37 @@ public class Partida {
      * Reinicia el contador de 6 seguidos
      */
     public void cambiarTurno() {
-        turnoActual.setTurno(false);
+        if (turnoActual != null) {
+            turnoActual.setTurno(false);
+        }
+        
         int indiceActual = jugadores.indexOf(turnoActual);
         int siguienteIndice = (indiceActual + 1) % jugadores.size();
         turnoActual = jugadores.get(siguienteIndice);
         turnoActual.setTurno(true);
         contadorSeis = 0;
+        
+        System.out.println("[JUEGO] Turno cambiado al Jugador " + turnoActual.getIdJugador() + 
+                         " (" + turnoActual.getNombre() + ")");
+    }
+    
+    /**
+     * Establece manualmente el turno a un jugador especifico (para sincronizacion de red)
+     */
+    public void setTurnoActual(int jugadorId) {
+        for (Jugador j : jugadores) {
+            j.setTurno(false);
+        }
+        
+        for (Jugador j : jugadores) {
+            if (j.getIdJugador() == jugadorId) {
+                this.turnoActual = j;
+                j.setTurno(true);
+                System.out.println("[JUEGO] Turno establecido al Jugador " + jugadorId + 
+                                 " (" + j.getNombre() + ")");
+                break;
+            }
+        }
     }
     
     /**
@@ -66,6 +99,8 @@ public class Partida {
         System.out.println("\n============================================");
         System.out.println("|        PARTIDA FINALIZADA                |");
         System.out.println("============================================");
+        
+        String ganador = null;
         for (Jugador j : jugadores) {
             int fichasEnMeta = 0;
             for (Ficha f : j.getFichas()) {
@@ -74,7 +109,17 @@ public class Partida {
                 }
             }
             System.out.println(j.getNombre() + ": " + fichasEnMeta + " fichas en meta");
+            
+            if (fichasEnMeta == 4 && ganador == null) {
+                ganador = j.getNombre();
+            }
         }
+        
+        if (ganador != null) {
+            registroJSON.registrarFinPartida(ganador);
+        }
+        
+        registroJSON.guardarRegistro();
     }
     
     /**
@@ -85,8 +130,21 @@ public class Partida {
     public void agregarJugador(Jugador jugador) {
         if (jugadores.size() < 4) {
             jugadores.add(jugador);
-            System.out.println("Jugador " + jugador.getNombre() + " agregado");
+            System.out.println("Jugador " + jugador.getNombre() + " agregado (ID: " + 
+                             jugador.getIdJugador() + ")");
         }
+    }
+    
+    /**
+     * Busca un jugador por el color de su ficha
+     */
+    public Jugador buscarJugadorPorColor(String color) {
+        for (Jugador j : jugadores) {
+            if (j.getColor().equalsIgnoreCase(color)) {
+                return j;
+            }
+        }
+        return null;
     }
     
     // Getters y Setters
@@ -99,4 +157,5 @@ public class Partida {
     public int getContadorSeis() { return contadorSeis; }
     public void incrementarContadorSeis() { this.contadorSeis++; }
     public void reiniciarContadorSeis() { this.contadorSeis = 0; }
+    public RegistroPartidaJSON getRegistroJSON() { return registroJSON; }
 }

@@ -1,6 +1,6 @@
 /**
  * Representa el tablero completo del juego
- * Contiene 68 casillas en total
+ * Contiene 68 casillas en total 
  */
 package modelo;
 
@@ -10,6 +10,7 @@ import java.util.List;
 public class Tablero {
     private List<Casilla> casillas;
     private static final int TOTAL_CASILLAS = 68;
+    private static final int CASILLA_META = 67;
     
     /**
      * Constructor del tablero
@@ -28,7 +29,6 @@ public class Tablero {
         for (int i = 0; i < TOTAL_CASILLAS; i++) {
             String tipo = "normal";
             
-            // Casillas seguras en posiciones estrategicas
             if (i == 5 || i == 22 || i == 39 || i == 56 || i % 17 == 0) {
                 tipo = "segura";
             }
@@ -38,7 +38,7 @@ public class Tablero {
     }
     
     /**
-     * Mueve una ficha en el tablero
+     * Mueve una ficha en el tablero - CORREGIDO
      * Actualiza la posicion y maneja llegada a meta
      * @param ficha Ficha a mover
      * @param pasos Numero de casillas a avanzar
@@ -47,21 +47,19 @@ public class Tablero {
         int posicionActual = ficha.getPosicion();
         int nuevaPosicion = posicionActual + pasos;
         
-        // Control de meta (casilla 67 es la ultima antes de meta)
-        if (nuevaPosicion >= TOTAL_CASILLAS) {
-            nuevaPosicion = TOTAL_CASILLAS - 1;
-            ficha.llegarMeta();
-        }
-        
-        // Remover de casilla actual
         if (posicionActual >= 0 && posicionActual < casillas.size()) {
             casillas.get(posicionActual).removerFicha(ficha);
         }
         
+        if (nuevaPosicion >= CASILLA_META) {
+            ficha.setPosicion(CASILLA_META);
+            ficha.llegarMeta();
+            return;
+        }
+        
         ficha.setPosicion(nuevaPosicion);
         
-        // Agregar a nueva casilla (solo si no llego a meta)
-        if (!ficha.isEnMeta() && nuevaPosicion >= 0 && nuevaPosicion < casillas.size()) {
+        if (nuevaPosicion >= 0 && nuevaPosicion < casillas.size()) {
             casillas.get(nuevaPosicion).agregarFicha(ficha);
         }
     }
@@ -78,7 +76,7 @@ public class Tablero {
         return null;
     }
     
-    // Getters
     public List<Casilla> getCasillas() { return casillas; }
     public int getTotalCasillas() { return TOTAL_CASILLAS; }
+    public int getCasillaMeta() { return CASILLA_META; }
 }
